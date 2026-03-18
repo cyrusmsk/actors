@@ -14,5 +14,12 @@ Now it is finding its own closest non-coloted node and start send messages to th
 There is also a coordinator node (main thread). Every time any node getting any color it sends a message to coordinator and letting him know the color.
 In Raylib version the data updated by coordinator is also used for animation.
 
+## Building the project
+Run inside the folder:
+```
+dub run raylib-d:install
+dub build
+```
+
 ## License
 MIT
