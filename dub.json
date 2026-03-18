@@ -1,0 +1,14 @@
+{
+  "description": "A minimal D application.",
+  "libs": ["raylib"],
+  "dependencies": {
+    "raylib-d": "~>5.5.3"
+  },
+  "lflags-posix": ["-L."],
+  "lflags-osx": ["-rpath", "@executable_path/"],
+  "lflags-linux": ["-rpath=$$ORIGIN"],
+  "authors": ["Sergei Giniatulin"],
+  "copyright": "Copyright © 2026, Sergei Giniatulin",
+  "license": "proprietary",
+  "name": "actors"
+}

@@ -1,0 +1,17 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/actors
+actors.so
+actors.dylib
+actors.dll
+libactors.a
+actors.a
+actors.lib
+actors-test-*
+*.exe
+*.pdb
+*.o
+*.obj
+*.lst
