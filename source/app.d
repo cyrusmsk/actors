@@ -102,8 +102,9 @@ void dotActor(
             sqrt((x - xs[a]) ^^ 2 + (y - ys[a]) ^^ 2) <
             sqrt((x - xs[b]) ^^ 2 + (y - ys[b]) ^^ 2)
     );
+    bool running = true;
 
-    while (true)
+    while (running)
     {
         receiveTimeout(dur!"msecs"(5),
             (InitMsg msg) {
@@ -140,6 +141,7 @@ void dotActor(
             (StopActor sa) {
             if (sa.status)
             {
+                running = false;
                 return;
             }
         },
@@ -166,7 +168,7 @@ void dotActor(
 void main()
 {
     enum totalNodes = 1000;
-    enum THRESHOLD = 5;
+    enum THRESHOLD = 3;
 
     bool[Tid] coloredMap;
     ubyte[Tid] colorsMap; // store each node's color
@@ -230,7 +232,6 @@ void main()
     sw.stop();
     foreach (t; actors)
         send(t, StopActor(true));
-    Thread.sleep(dur!"msecs"(100));
     writeln("All nodes colored!");
     writeln("Time: ", sw.peek.total!"msecs", " ms");
 
@@ -249,4 +250,5 @@ void main()
         }
     }
     CloseWindow();
+    Thread.sleep(dur!"msecs"(100));
 }
