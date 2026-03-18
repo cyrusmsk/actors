@@ -6,7 +6,6 @@ import std.algorithm;
 import std.range;
 import core.thread;
 import std.datetime.stopwatch;
-import raylib;
 
 // ----------------------
 // Messages
@@ -31,103 +30,25 @@ struct ColoredMsg
     ubyte color;
 }
 
-struct StatusQuery
-{
-    Tid requester;
-}
-
 struct StatusReply
 {
     bool colored;
 }
 
+struct StopActor
+{
+    bool status;
+}
+
 struct ColorRequest
 {
     Tid requester;
+    Tid target;
 }
 
 struct ColorResponse
 {
-    immutable ubyte[] colors;
-}
-
-// ----------------------
-// Coordinator Actor
-// ----------------------
-void coordinatorActor(int totalNodes)
-{
-    enum THRESHOLD = 2;
-
-    bool[Tid] coloredMap;
-    ubyte[Tid] colorsMap; // store each node's color
-    int coloredCount = 0;
-
-    Tid[] actors;
-    actors.length = totalNodes;
-
-    auto xs = totalNodes.iota.map!(e => uniform(50.0, 750.0)).array;
-    auto ys = totalNodes.iota.map!(e => uniform(50.0, 550.0)).array;
-
-    // spawn actors
-    foreach (i; 0 .. totalNodes)
-        actors[i] = spawn(&dotActor, i, xs[i], ys[i], xs.idup, ys.idup);
-
-    // initialize actors
-    foreach (i; 0 .. totalNodes)
-    {
-        ubyte initialColor = 255;
-        if (i < 3)
-            initialColor = cast(ubyte) i;
-        send(actors[i], InitMsg(initialColor, THRESHOLD, thisTid, cast(immutable(Tid)[]) actors));
-    }
-
-    // ----------------------
-    // Initialize Raylib
-    // ----------------------
-    InitWindow(800, 600, "Actor Color Diffusion");
-    SetTargetFPS(60);
-
-    StopWatch sw;
-    sw.start();
-
-    while (!WindowShouldClose())
-    {
-        BeginDrawing();
-        ClearBackground(Colors.RAYWHITE);
-
-        receive(
-            (ColoredMsg msg) {
-            if (!(msg.who in coloredMap))
-            {
-                coloredMap[msg.who] = true;
-                colorsMap[msg.who] = msg.color;
-                coloredCount++;
-                writeln("Colored: ", coloredCount, "/", totalNodes);
-            }
-        },
-            (StatusQuery msg) {
-            auto status = coloredMap.get(msg.requester, false);
-            send(msg.requester, StatusReply(status));
-        },
-            (ColorRequest msg) {
-            immutable ubyte[] colors = colorsMap.values;
-            send(msg.requester, ColorResponse(colors));
-        }
-        );
-        // draw all dots
-        foreach (i; 0 .. totalNodes)
-        {
-            DrawCircle(cast(int) xs[i], cast(int) ys[i], 10, getColor(colorsMap[actors[i]]));
-        }
-
-        EndDrawing();
-    }
-
-    CloseWindow();
-
-    sw.stop();
-    writeln("\nAll nodes colored!");
-    writeln("Time: ", sw.peek.total!"msecs", " ms");
+    bool targetColored;
 }
 
 // ----------------------
@@ -148,6 +69,7 @@ void dotActor(
     Tid currentTarget;
     size_t neighborIndex = 0;
     immutable(Tid)[] actors;
+    bool currentTargetColored = true;
 
     auto N = xs.length;
     long[] sortedNeighbors;
@@ -170,6 +92,7 @@ void dotActor(
             threshold = msg.threshold;
             coordinator = msg.coordinator;
             actors = msg.actors;
+            Thread.sleep(dur!"msecs"(5));
             if (color != 255)
                 send(coordinator, ColoredMsg(thisTid, color));
         },
@@ -194,6 +117,17 @@ void dotActor(
             {
                 neighborIndex++;
             }
+        },
+            (StopActor sa) {
+            if (sa.status)
+            {
+                writeln("finish");
+                return;
+            }
+        },
+            (ColorResponse cr) {
+            writeln("got result that currentTarget ", cr.targetColored);
+            currentTargetColored = cr.targetColored;
         }
         );
 
@@ -201,28 +135,10 @@ void dotActor(
         {
             long targetIndex = sortedNeighbors[neighborIndex];
             currentTarget = cast(Tid) actors[targetIndex];
-            send(coordinator, StatusQuery(currentTarget));
+            send(currentTarget, ColorMsg(thisTid, color));
         }
 
         Thread.sleep(dur!"msecs"(5));
-    }
-}
-
-// ----------------------
-// Color Mapping for Raylib
-// ----------------------
-Color getColor(ubyte c)
-{
-    switch (c)
-    {
-    case 0:
-        return Colors.RED;
-    case 1:
-        return Colors.BLUE;
-    case 2:
-        return Colors.GREEN;
-    default:
-        return Colors.GRAY; // uncolored
     }
 }
 
@@ -231,8 +147,60 @@ Color getColor(ubyte c)
 // ----------------------
 void main()
 {
-    enum N = 40;
+    enum totalNodes = 100;
+    enum THRESHOLD = 3;
 
-    // spawn coordinator first
-    auto coord = spawn(&coordinatorActor, N);
+    bool[Tid] coloredMap;
+    ubyte[Tid] colorsMap; // store each node's color
+    int coloredCount = 0;
+
+    Tid[] actors;
+    actors.length = totalNodes;
+
+    auto xs = totalNodes.iota.map!(e => uniform(50.0, 750.0)).array;
+    auto ys = totalNodes.iota.map!(e => uniform(50.0, 550.0)).array;
+
+    // spawn actors
+    foreach (i; 0 .. totalNodes)
+        actors[i] = spawn(&dotActor, i, xs[i], ys[i], xs.idup, ys.idup);
+
+    // initialize actors
+    foreach (i; 0 .. totalNodes)
+    {
+        ubyte initialColor = 255;
+        if (i < 1)
+            initialColor = cast(ubyte) i;
+        send(actors[i], InitMsg(initialColor, THRESHOLD, thisTid, cast(immutable(Tid)[]) actors));
+    }
+
+    StopWatch sw;
+    sw.start();
+
+    while (coloredCount < totalNodes)
+    {
+        receiveTimeout(dur!"msecs"(1),
+            (ColoredMsg msg) {
+            auto p = msg.who in coloredMap;
+            if (p is null)
+            {
+                writeln("Coordinator recieved from ", msg.who);
+                coloredMap[msg.who] = true;
+                colorsMap[msg.who] = msg.color;
+                coloredCount++;
+                writeln("Colored: ", coloredCount, "/", totalNodes);
+            }
+        },
+            (ColorRequest msg) {
+            send(msg.requester, ColorResponse(coloredMap.get(msg.target, false)));
+        }
+        );
+    }
+
+    sw.stop();
+    foreach (t; actors)
+        send(t, StopActor(true));
+
+    Thread.sleep(dur!"seconds"(1));
+    writeln("\nAll nodes colored!");
+    writeln("Time: ", sw.peek.total!"msecs", " ms");
 }
