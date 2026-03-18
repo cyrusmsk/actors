@@ -9,6 +9,24 @@ import std.datetime.stopwatch;
 import raylib;
 
 // ----------------------
+// Color Mapping for Raylib
+// ----------------------
+Color getColor(ubyte c)
+{
+    switch (c)
+    {
+    case 0:
+        return Colors.RED;
+    case 1:
+        return Colors.BLUE;
+    case 2:
+        return Colors.GREEN;
+    default:
+        return Colors.GRAY; // uncolored
+    }
+}
+
+// ----------------------
 // Messages
 // ----------------------
 struct ColorMsg
@@ -31,32 +49,124 @@ struct ColoredMsg
     ubyte color;
 }
 
-struct StatusQuery
-{
-    Tid requester;
-}
-
 struct StatusReply
 {
     bool colored;
 }
 
+struct StopActor
+{
+    bool status;
+}
+
 struct ColorRequest
 {
     Tid requester;
+    Tid target;
 }
 
 struct ColorResponse
 {
-    immutable ubyte[] colors;
+    bool targetColored;
 }
 
 // ----------------------
-// Coordinator Actor
+// Dot Actor
 // ----------------------
-void coordinatorActor(int totalNodes)
+void dotActor(
+    int id,
+    double x,
+    double y,
+    immutable(double)[] xs,
+    immutable(double)[] ys
+)
 {
-    enum THRESHOLD = 2;
+    ubyte color = 255;
+    ubyte threshold;
+    Tid coordinator;
+    ubyte[ubyte] freq;
+    Tid currentTarget;
+    size_t neighborIndex = 0;
+    immutable(Tid)[] actors;
+    bool currentTargetColored = true;
+
+    auto N = xs.length;
+    long[] sortedNeighbors;
+    sortedNeighbors.length = N - 1;
+    long idx = 0;
+    foreach (long i; 0 .. N)
+        if (i != id)
+            sortedNeighbors[idx++] = i;
+
+    sortedNeighbors.sort!((a, b) =>
+            sqrt((x - xs[a]) ^^ 2 + (y - ys[a]) ^^ 2) <
+            sqrt((x - xs[b]) ^^ 2 + (y - ys[b]) ^^ 2)
+    );
+
+    while (true)
+    {
+        receiveTimeout(dur!"msecs"(5),
+            (InitMsg msg) {
+            color = msg.initialColor;
+            threshold = msg.threshold;
+            coordinator = msg.coordinator;
+            actors = msg.actors;
+            Thread.sleep(dur!"msecs"(5));
+            if (color != 255)
+                send(coordinator, ColoredMsg(thisTid, color));
+        },
+            (ColorMsg msg) {
+            if (color == 255)
+            {
+                freq[msg.color]++;
+                if (freq[msg.color] >= threshold)
+                {
+                    color = msg.color;
+                    send(coordinator, ColoredMsg(thisTid, color));
+                }
+            }
+            else
+            {
+                // already colored: inform sender
+                send(msg.sender, StatusReply(true));
+            }
+        },
+            (StatusReply reply) {
+            if (reply.colored)
+            {
+                neighborIndex++;
+            }
+        },
+            (StopActor sa) {
+            if (sa.status)
+            {
+                return;
+            }
+        },
+            (ColorResponse cr) {
+            writeln("got result that currentTarget ", cr.targetColored);
+            currentTargetColored = cr.targetColored;
+        }
+        );
+
+        if (color != 255 && neighborIndex < sortedNeighbors.length)
+        {
+            long targetIndex = sortedNeighbors[neighborIndex];
+            currentTarget = cast(Tid) actors[targetIndex];
+            send(currentTarget, ColorMsg(thisTid, color));
+        }
+
+        Thread.sleep(dur!"msecs"(5));
+    }
+}
+
+// ----------------------
+// Main
+// ----------------------
+void main()
+{
+    enum totalNodes = 1000;
+    enum THRESHOLD = 5;
 
     bool[Tid] coloredMap;
     ubyte[Tid] colorsMap; // store each node's color
@@ -90,149 +200,53 @@ void coordinatorActor(int totalNodes)
     StopWatch sw;
     sw.start();
 
-    while (!WindowShouldClose())
+    while (coloredCount < totalNodes)
     {
         BeginDrawing();
         ClearBackground(Colors.RAYWHITE);
-
-        receive(
+        foreach (i; 0 .. totalNodes)
+        {
+            DrawCircle(cast(int) xs[i], cast(int) ys[i], 10, getColor(colorsMap.get(actors[i], 255U)));
+        }
+        EndDrawing();
+        receiveTimeout(dur!"msecs"(1),
             (ColoredMsg msg) {
-            if (!(msg.who in coloredMap))
+            auto p = msg.who in coloredMap;
+            if (p is null)
             {
+                writeln("Coordinator recieved from ", msg.who);
                 coloredMap[msg.who] = true;
                 colorsMap[msg.who] = msg.color;
                 coloredCount++;
                 writeln("Colored: ", coloredCount, "/", totalNodes);
             }
         },
-            (StatusQuery msg) {
-            auto status = coloredMap.get(msg.requester, false);
-            send(msg.requester, StatusReply(status));
-        },
             (ColorRequest msg) {
-            immutable ubyte[] colors = colorsMap.values;
-            send(msg.requester, ColorResponse(colors));
+            send(msg.requester, ColorResponse(coloredMap.get(msg.target, false)));
         }
         );
-        // draw all dots
-        foreach (i; 0 .. totalNodes)
-        {
-            DrawCircle(cast(int) xs[i], cast(int) ys[i], 10, getColor(colorsMap[actors[i]]));
-        }
-
-        EndDrawing();
     }
-
-    CloseWindow();
 
     sw.stop();
-    writeln("\nAll nodes colored!");
+    foreach (t; actors)
+        send(t, StopActor(true));
+    Thread.sleep(dur!"msecs"(100));
+    writeln("All nodes colored!");
     writeln("Time: ", sw.peek.total!"msecs", " ms");
-}
 
-// ----------------------
-// Dot Actor
-// ----------------------
-void dotActor(
-    int id,
-    double x,
-    double y,
-    immutable(double)[] xs,
-    immutable(double)[] ys
-)
-{
-    ubyte color = 255;
-    ubyte threshold;
-    Tid coordinator;
-    ubyte[ubyte] freq;
-    Tid currentTarget;
-    size_t neighborIndex = 0;
-    immutable(Tid)[] actors;
-
-    auto N = xs.length;
-    long[] sortedNeighbors;
-    sortedNeighbors.length = N - 1;
-    long idx = 0;
-    foreach (long i; 0 .. N)
-        if (i != id)
-            sortedNeighbors[idx++] = i;
-
-    sortedNeighbors.sort!((a, b) =>
-            sqrt((x - xs[a]) ^^ 2 + (y - ys[a]) ^^ 2) <
-            sqrt((x - xs[b]) ^^ 2 + (y - ys[b]) ^^ 2)
-    );
-
-    while (true)
+    while (!WindowShouldClose())
     {
-        receiveTimeout(dur!"msecs"(5),
-            (InitMsg msg) {
-            color = msg.initialColor;
-            threshold = msg.threshold;
-            coordinator = msg.coordinator;
-            actors = msg.actors;
-            if (color != 255)
-                send(coordinator, ColoredMsg(thisTid, color));
-        },
-            (ColorMsg msg) {
-            if (color == 255)
-            {
-                freq[msg.color]++;
-                if (freq[msg.color] >= threshold)
-                {
-                    color = msg.color;
-                    send(coordinator, ColoredMsg(thisTid, color));
-                }
-            }
-            else
-            {
-                // already colored: inform sender
-                send(msg.sender, StatusReply(true));
-            }
-        },
-            (StatusReply reply) {
-            if (reply.colored)
-            {
-                neighborIndex++;
-            }
-        }
-        );
-
-        if (color != 255 && neighborIndex < sortedNeighbors.length)
+        BeginDrawing();
+        ClearBackground(Colors.RAYWHITE);
+        foreach (i; 0 .. totalNodes)
         {
-            long targetIndex = sortedNeighbors[neighborIndex];
-            currentTarget = cast(Tid) actors[targetIndex];
-            send(coordinator, StatusQuery(currentTarget));
+            DrawCircle(cast(int) xs[i], cast(int) ys[i], 10, getColor(colorsMap.get(actors[i], 255U)));
         }
-
-        Thread.sleep(dur!"msecs"(5));
+        EndDrawing();
+        if (GetKeyPressed() != 0)
+        {
+            break;
+        }
     }
-}
-
-// ----------------------
-// Color Mapping for Raylib
-// ----------------------
-Color getColor(ubyte c)
-{
-    switch (c)
-    {
-    case 0:
-        return Colors.RED;
-    case 1:
-        return Colors.BLUE;
-    case 2:
-        return Colors.GREEN;
-    default:
-        return Colors.GRAY; // uncolored
-    }
-}
-
-// ----------------------
-// Main
-// ----------------------
-void main()
-{
-    enum N = 40;
-
-    // spawn coordinator first
-    auto coord = spawn(&coordinatorActor, N);
+    CloseWindow();
 }
