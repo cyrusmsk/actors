@@ -15,3 +15,7 @@ actors-test-*
 *.o
 *.obj
 *.lst
+*.dylib
+*.dll
+*.so
+*.a
