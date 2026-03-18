@@ -21,6 +21,14 @@ Color getColor(ubyte c)
         return Colors.BLUE;
     case 2:
         return Colors.GREEN;
+    case 3:
+        return Colors.ORANGE;
+    case 4:
+        return Colors.PURPLE;
+    case 5:
+        return Colors.PINK;
+    case 6:
+        return Colors.YELLOW;
     default:
         return Colors.GRAY; // uncolored
     }
@@ -57,17 +65,6 @@ struct StatusReply
 struct StopActor
 {
     bool status;
-}
-
-struct ColorRequest
-{
-    Tid requester;
-    Tid target;
-}
-
-struct ColorResponse
-{
-    bool targetColored;
 }
 
 // ----------------------
@@ -144,10 +141,6 @@ void dotActor(
                 running = false;
                 return;
             }
-        },
-            (ColorResponse cr) {
-            writeln("got result that currentTarget ", cr.targetColored);
-            currentTargetColored = cr.targetColored;
         }
         );
 
@@ -167,7 +160,7 @@ void dotActor(
 // ----------------------
 void main()
 {
-    enum totalNodes = 1000;
+    enum totalNodes = 800;
     enum THRESHOLD = 3;
 
     bool[Tid] coloredMap;
@@ -188,7 +181,7 @@ void main()
     foreach (i; 0 .. totalNodes)
     {
         ubyte initialColor = 255;
-        if (i < 3)
+        if (i < 4)
             initialColor = cast(ubyte) i;
         send(actors[i], InitMsg(initialColor, THRESHOLD, thisTid, cast(immutable(Tid)[]) actors));
     }
@@ -222,9 +215,6 @@ void main()
                 coloredCount++;
                 writeln("Colored: ", coloredCount, "/", totalNodes);
             }
-        },
-            (ColorRequest msg) {
-            send(msg.requester, ColorResponse(coloredMap.get(msg.target, false)));
         }
         );
     }
@@ -250,5 +240,4 @@ void main()
         }
     }
     CloseWindow();
-    Thread.sleep(dur!"msecs"(100));
 }
