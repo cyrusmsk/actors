@@ -40,17 +40,6 @@ struct StopActor
     bool status;
 }
 
-struct ColorRequest
-{
-    Tid requester;
-    Tid target;
-}
-
-struct ColorResponse
-{
-    bool targetColored;
-}
-
 // ----------------------
 // Dot Actor
 // ----------------------
@@ -83,8 +72,9 @@ void dotActor(
             sqrt((x - xs[a]) ^^ 2 + (y - ys[a]) ^^ 2) <
             sqrt((x - xs[b]) ^^ 2 + (y - ys[b]) ^^ 2)
     );
+    bool running = true;
 
-    while (true)
+    while (running)
     {
         receiveTimeout(dur!"msecs"(5),
             (InitMsg msg) {
@@ -121,13 +111,9 @@ void dotActor(
             (StopActor sa) {
             if (sa.status)
             {
-                writeln("finish");
+                running = false;
                 return;
             }
-        },
-            (ColorResponse cr) {
-            writeln("got result that currentTarget ", cr.targetColored);
-            currentTargetColored = cr.targetColored;
         }
         );
 
@@ -147,11 +133,11 @@ void dotActor(
 // ----------------------
 void main()
 {
-    enum totalNodes = 100;
+    enum totalNodes = 800;
     enum THRESHOLD = 3;
 
     bool[Tid] coloredMap;
-    ubyte[Tid] colorsMap; // store each node's color
+    ubyte[Tid] colorsMap;
     int coloredCount = 0;
 
     Tid[] actors;
@@ -183,15 +169,12 @@ void main()
             auto p = msg.who in coloredMap;
             if (p is null)
             {
-                writeln("Coordinator recieved from ", msg.who);
+                debug writeln("Coordinator recieved from ", msg.who);
                 coloredMap[msg.who] = true;
                 colorsMap[msg.who] = msg.color;
                 coloredCount++;
-                writeln("Colored: ", coloredCount, "/", totalNodes);
+                debug writeln("Colored: ", coloredCount, "/", totalNodes);
             }
-        },
-            (ColorRequest msg) {
-            send(msg.requester, ColorResponse(coloredMap.get(msg.target, false)));
         }
         );
     }
@@ -200,7 +183,6 @@ void main()
     foreach (t; actors)
         send(t, StopActor(true));
 
-    Thread.sleep(dur!"seconds"(1));
     writeln("\nAll nodes colored!");
     writeln("Time: ", sw.peek.total!"msecs", " ms");
 }
